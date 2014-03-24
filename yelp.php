@@ -21,7 +21,6 @@ class Yelp
 	public function query(){
 		$this->validate();
 		$url = $this->requestBuilder();
-		echo $url;
 
 		require_once ('yelp-api/v2/php/lib/OAuth.php');
 
@@ -68,7 +67,6 @@ class Yelp
 				throw new Exception('You attempted to use an API that is either a) not supported by this wrapper, or b) not supported by Yelp', 1);
 				break;
 		}
-		echo 'validation complete';
 	}
 
 	private function validate_search(){
