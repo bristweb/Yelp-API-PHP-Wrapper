@@ -43,13 +43,13 @@ class Yelp
 		$lati = $this->meters2lat($step);
 		$grid = array();
 		for ($i=($dividers+1)/2*-1; $i < $dividers/2; $i++) { //will this work with decimals?
-			$swlat = $centerlat + $i*$lati;
-			$nelat = $swlat + $lati;
+			$swlat = $centerlat + $i*$lati;  //this should be a function to account for crossing a meridian/equator
+			$nelat = $swlat + $lati;  //this should be a function to account for crossing a meridian/equator
 			$slngi = $this->meters2lng($step,$swlat);
 			$nlngi = $this->meters2lng($step,$nelat);
 			for ($j=($dividers+1)/2*-1; $j < $dividers/2; $j++) { 
-				$swlng = $centerlng + $j*$slngi;
-				$nelng = $swlng + $nlngi;
+				$swlng = $centerlng + $j*$slngi;  //this should be a function to account for crossing a meridian/equator
+				$nelng = $swlng + $nlngi;  //this should be a function to account for crossing a meridian/equator
 				$this->parameters[bounds] = array('sw_latitude'=>$swlat,'sw_longitude'=>$swlng,'ne_latitude'=>$nelat,'ne_longitude'=>$nelng);
 				$this->query_curl();
 				$grid[] = $this->response;
@@ -135,6 +135,22 @@ class Yelp
 	}
 
 	private function query_curl(){
+		$data = json_decode($this->query_curl_helper());
+		//sort mode 1 or 2 allows an additional 20 businesses past the initial limit of the first 20 results
+		//code below retreives the additional results automatically.
+		$sort = $this->parameters[sort];
+		if (($data->total > 20) && isset($sort) && (in_array($sort, array(1,2)))) { 
+			$this->parameters[offset] = 20;
+			$extra = json_decode($this->query_curl_helper());
+			unset($this->parameters[offset]);
+			$data->businesses = array_merge($data->businesses,$extra->businesses);
+		}
+
+		// Handle Yelp response data
+		$this->response = $data;
+	}
+
+	private function query_curl_helper(){
 		$url = $this->requestBuilder();
 		require_once ('yelp-api/v2/php/lib/OAuth.php');
 		// Token object built using the OAuth library
@@ -161,9 +177,7 @@ class Yelp
 		curl_setopt($ch, CURLOPT_HEADER, 0);
 		$data = curl_exec($ch); // Yelp response
 		curl_close($ch);
-
-		// Handle Yelp response data
-		$this->response = json_decode($data);
+		return $data;
 	}
 
 	private function requestBuilder(){
