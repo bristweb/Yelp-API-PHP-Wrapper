@@ -10,6 +10,8 @@ class Yelp
 	public $api					= 'search';
 	public $parameters 			= NULL; #see http://www.yelp.com/developers/documentation/v2/search_api
 
+	private $response			= array();
+
 	public function __construct($consumer_key, $consumer_secret, $token, $token_secret)
 	{
 		$this->consumer_key = $consumer_key;
@@ -20,42 +22,48 @@ class Yelp
 
 	public function query(){
 		$this->validate();
-		$url = $this->requestBuilder();
+		$this->query_curl();
+		$this->get_response();
+	}
 
-		require_once ('yelp-api/v2/php/lib/OAuth.php');
+	public function multiquery($centerlat, $centerlng, $side, $dividers){
+		//the query will cover a square area with each side having a length of $side (meters)
+		//$dividers are the number od divisions to the square horizontallly and vertically 
+		//(ex: $dividers=1 == fourths, $dividers=2 == ninths, $dividers=3 == sixteenths, etc)
+		if (!is_int($dividers) || ($dividers<=0)) 
+			throw new Exception("$dividers must be an integer greater than zero");
+		$step = $side/($dividers+1);
+		if (($step) > 20000 )
+			throw new Exception("the subdivisions must not have sides greater than 20,000m");
+		$p = $this->parameters;
+		if (isset($p[bounds]) || isset($p[ll]) || isset($p[cll]) || isset($p[location])) {
+			throw new Exception("Parameters for bounds, ll, cll, and location shouldn't be set");
+		}
+		$this->validate();
+		$lati = $this->meters2lat($step);
+		$grid = array();
+		for ($i=($dividers+1)/2*-1; $i < $dividers/2; $i++) { //will this work with decimals?
+			$swlat = $centerlat + $i*$lati;
+			$nelat = $swlat + $lati;
+			$slngi = $this->meters2lng($step,$swlat);
+			$nlngi = $this->meters2lng($step,$nelat);
+			for ($j=($dividers+1)/2*-1; $j < $dividers/2; $j++) { 
+				$swlng = $centerlng + $j*$slngi;
+				$nelng = $swlng + $nlngi;
+				$this->parameters[bounds] = array('sw_latitude'=>$swlat,'sw_longitude'=>$swlng,'ne_latitude'=>$nelat,'ne_longitude'=>$nelng);
+				$this->query_curl();
+				$grid[] = $this->response;
+			}
+		}
+		$this->response = $grid;
+		$this->get_response();
+	}
 
-		// Token object built using the OAuth library
-		$oauthtoken = new OAuthToken($this->token, $this->token_secret);
-
-		// Consumer object built using the OAuth library
-		$oauthconsumer = new OAuthConsumer($this->consumer_key, $this->consumer_secret);
-
-		// Yelp uses HMAC SHA1 encoding
-		$signature_method = new OAuthSignatureMethod_HMAC_SHA1();
-
-		// Build OAuth Request using the OAuth PHP library. Uses the consumer and token object created above.
-		$oauthrequest = OAuthRequest::from_consumer_and_token($oauthconsumer, $oauthtoken, 'GET', $url);
-
-		// Sign the request
-		$oauthrequest->sign_request($signature_method, $oauthconsumer, $oauthtoken);
-
-		// Get the signed URL
-		$signed_url = $oauthrequest->to_url();
-
-		// Send Yelp API Call
-		$ch = curl_init($signed_url);
-		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-		curl_setopt($ch, CURLOPT_HEADER, 0);
-		$data = curl_exec($ch); // Yelp response
-		curl_close($ch);
-
-		// Handle Yelp response data
-		$response = json_decode($data);
-
+	public function get_response(){
 		// Print it for debugging
-		print_r($response);
+		print_r($this->response);
 
-		return $response;
+		return $this->response;
 	}
 
 	private function validate(){
@@ -126,6 +134,38 @@ class Yelp
 		}
 	}
 
+	private function query_curl(){
+		$url = $this->requestBuilder();
+		require_once ('yelp-api/v2/php/lib/OAuth.php');
+		// Token object built using the OAuth library
+		$oauthtoken = new OAuthToken($this->token, $this->token_secret);
+
+		// Consumer object built using the OAuth library
+		$oauthconsumer = new OAuthConsumer($this->consumer_key, $this->consumer_secret);
+
+		// Yelp uses HMAC SHA1 encoding
+		$signature_method = new OAuthSignatureMethod_HMAC_SHA1();
+
+		// Build OAuth Request using the OAuth PHP library. Uses the consumer and token object created above.
+		$oauthrequest = OAuthRequest::from_consumer_and_token($oauthconsumer, $oauthtoken, 'GET', $url);
+
+		// Sign the request
+		$oauthrequest->sign_request($signature_method, $oauthconsumer, $oauthtoken);
+
+		// Get the signed URL
+		$signed_url = $oauthrequest->to_url();
+
+		// Send Yelp API Call
+		$ch = curl_init($signed_url);
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+		curl_setopt($ch, CURLOPT_HEADER, 0);
+		$data = curl_exec($ch); // Yelp response
+		curl_close($ch);
+
+		// Handle Yelp response data
+		$this->response = json_decode($data);
+	}
+
 	private function requestBuilder(){
 		$url = 'http://api.yelp.com/v2/';
 		$query_array = NULL;
@@ -153,7 +193,7 @@ class Yelp
 	private function requestBuilder_arrayhelper($key, $parameter){
 		switch ($this->api) {
 			case 'search':
-				return requestBuilder_arrayhelper_search($key, $parameter); break;
+				return $this->requestBuilder_arrayhelper_search($key, $parameter); break;
 			default:
 				# the switch here should match the validate() switch and default should never occur
 				break;
@@ -172,6 +212,20 @@ class Yelp
 				break;
 		}
 	}
-}
 
+	/**
+	 * Returns the longitude equal to a given distance (meters) at a given latitude
+	 */
+	private function meters2lng($meters,$latitude){
+	    return $meters/(cos(deg2rad($latitude))*40075160/360);
+	}
+
+	/**
+	 * Returns the latitude equal to a given distance (meters)
+	 */
+	private function meters2lat($meters){      
+	    return $meters/(40075160/360);
+	}
+
+}
 ?>
