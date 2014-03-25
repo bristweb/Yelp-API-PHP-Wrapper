@@ -7,7 +7,7 @@ class Yelp
 	private $consumer_secret 	= NULL;
 	private $token 				= NULL;
 	private $token_secret 		= NULL;
-	private $api				= 'search';
+	public $api					= 'search';
 	public $parameters 			= NULL; #see http://www.yelp.com/developers/documentation/v2/search_api
 
 	public function __construct($consumer_key, $consumer_secret, $token, $token_secret)
@@ -64,14 +64,14 @@ class Yelp
 				$this->validate_search(); 
 				break;
 			default:
-				throw new Exception('You attempted to use an API that is either a) not supported by this wrapper, or b) not supported by Yelp', 1);
+				throw new Exception('You attempted to use an API that is either a) not supported by this wrapper, or b) not supported by Yelp');
 				break;
 		}
 	}
 
 	private function validate_search(){
-		$error = NULL;
-		foreach ($parameters as $key => $parameter) {
+		$error = false;
+		foreach ($this->parameters as $key => $parameter) {
 			switch ($key) {
 				case 'limit':
 					if (!is_int($parameter)) $error .= "'limit' parameter must be an integer.  "; break;
@@ -110,13 +110,19 @@ class Yelp
 						if (!is_numeric($v)) $error .= "'cll' ".$k." must be numeric.  ";
 					}
 					break;
+				case 'term':
+				case 'category_filter':
+				case 'cc':
+				case 'lang':
+				case 'location':
+					break; //let Yelp decide if these parameters are valid
 				default:
-					$error .= "You're trying to set a parameter that isn't supported.";
+					$error .= "You're trying to set parameter '".$key."', but that isn't supported.";
 					break;
 			}
 		}
-		if ($error != NULL) {
-			throw new Exception($error, 1);
+		if ($error) {
+			throw new Exception($error);
 		}
 	}
 
