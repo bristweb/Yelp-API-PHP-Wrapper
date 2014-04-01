@@ -10,7 +10,8 @@ class Yelp
 	public $api					= 'search';
 	public $parameters 			= NULL; #see http://www.yelp.com/developers/documentation/v2/search_api
 
-	private $response			= array();
+	public $response			= array();
+	public $businesses			= array();
 
 	public function __construct($consumer_key, $consumer_secret, $token, $token_secret)
 	{
@@ -148,6 +149,7 @@ class Yelp
 
 		// Handle Yelp response data
 		$this->response = $data;
+		$this->businesses = array_merge($this->businesses, $data->businesses);
 	}
 
 	private function query_curl_helper(){
