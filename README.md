@@ -47,7 +47,7 @@ try {
 Note: setting the 'sort' parameter allows for getting up to 40 results.  The script does this automatically for you.
 
 
-Break down your search to get many (dozens-hundreds-thousands) results from Yelp
+Break down your search into multiple smaller searches to get up to 200,000 results from Yelp per day.
 ```php
 require_once('yelp/yelp.php');
 
@@ -66,4 +66,8 @@ try {
 	print_r($e);
 }
 ```
-The multiquery breaks down your search into a grid of smaller searches.  You can set this to be as broad as you like.  The only limit is Yelp's throttle of 10,000 queries per day.  These queries can take a long time, so you should start small and do the math before plowing in.
+The multiquery breaks down your search into a grid of smaller searches.  You can set this to be as broad as you like.  The only limit is Yelp's throttle of 10,000 queries per day, giving a conceivable (though unlikely) 200,000 results per day.  These queries can take a long time, so you should start small and do the math before plowing in.
+
+Use `resume_multiquery()` to span your search over multiple days in order to obtain more results.
+
+

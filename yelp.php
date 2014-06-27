@@ -7,6 +7,7 @@ class Yelp
 	private $consumer_secret 	= NULL;
 	private $token 				= NULL;
 	private $token_secret 		= NULL;
+	private $throttle			= 9500; //10k queries per day (with a small buffer) http://www.yelp.com/developers/documentation/faq#q2
 	public $api					= 'search';
 	public $parameters 			= NULL; #see http://www.yelp.com/developers/documentation/v2/search_api
 
@@ -28,14 +29,22 @@ class Yelp
 	}
 
 	public function multiquery($centerlat, $centerlng, $side, $dividers){
+		$this->multiquery_helper($centerlat, $centerlng, $side, $dividers);
+	}
+	public function resume_multiquery($i_start, $j_start){
+		$this->multiquery_helper($centerlat, $centerlng, $side, $dividers, $i_start, $j_start);
+	}
+
+	private function multiquery_helper($centerlat, $centerlng, $side, $dividers, $i_start=false, $i_end=false){
 		//the query will cover a square area with each side having a length of $side (meters)
 		//$dividers are the number od divisions to the square horizontallly and vertically 
 		//(ex: $dividers=1 == fourths, $dividers=2 == ninths, $dividers=3 == sixteenths, etc)
 		if (!is_int($dividers) || ($dividers<=0)) 
 			throw new Exception("$dividers must be an integer greater than zero");
 		$step = $side/($dividers+1);
-		if (($step) > 20000 )
-			throw new Exception("the subdivisions must not have sides greater than 20,000m");
+		// if (($step) > 20000 )
+		// 	throw new Exception("the subdivisions must not have sides greater than 20,000m");
+		// turns out yelp will allow large area searches when done via boundaries
 		$p = $this->parameters;
 		if (isset($p[bounds]) || isset($p[ll]) || isset($p[cll]) || isset($p[location])) {
 			throw new Exception("Parameters for bounds, ll, cll, and location shouldn't be set");
@@ -43,22 +52,38 @@ class Yelp
 		$this->validate();
 		$lati = $this->meters2lat($step);
 		$grid = array();
-		for ($i=($dividers+1)/2*-1; $i < $dividers/2; $i++) { //will this work with decimals?
-			$swlat = $centerlat + $i*$lati;  //this should be a function to account for crossing a meridian/equator
-			$nelat = $swlat + $lati;  //this should be a function to account for crossing a meridian/equator
-			$slngi = $this->meters2lng($step,$swlat);
-			$nlngi = $this->meters2lng($step,$nelat);
-			for ($j=($dividers+1)/2*-1; $j < $dividers/2; $j++) { 
-				$swlng = $centerlng + $j*$slngi;  //this should be a function to account for crossing a meridian/equator
-				$nelng = $swlng + $nlngi;  //this should be a function to account for crossing a meridian/equator
-				$this->parameters[bounds] = array('sw_latitude'=>$swlat,'sw_longitude'=>$swlng,'ne_latitude'=>$nelat,'ne_longitude'=>$nelng);
-				$this->query_curl();
-				$grid[] = $this->response;
-			}
+		if (!$i_start) {
+			$i_start = ($dividers+1)/2*-1;
+			$j_start = ($dividers+1)/2*-1;
 		}
+		$i_end = $dividers/2;
+		$j_end = $dividers/2;
+		$multiquery_loop_vars = compact('centerlat','centerlng','side','dividers','step','lati','i_start','i_end','j_start','j_end');
+		$this->multiquery_loop($grid,$multiquery_loop_vars);
 		$this->response = $grid;
 		$this->get_response();
 	}
+		private function multiquery_loop(&$grid, $multiquery_loop_vars){
+			extract($multiquery_loop_vars);
+			for ($i=$i_start; $i < $i_end; $i++) { //will this work with decimals?
+				$swlat = $centerlat + $i*$lati;  //this should be a function to account for crossing a meridian/equator
+				$nelat = $swlat + $lati;  //this should be a function to account for crossing a meridian/equator
+				$slngi = $this->meters2lng($step,$swlat);
+				$nlngi = $this->meters2lng($step,$nelat);
+				for ($j=$j_start; $j < $j_end; $j++) { 
+					$swlng = $centerlng + $j*$slngi;  //this should be a function to account for crossing a meridian/equator
+					$nelng = $swlng + $nlngi;  //this should be a function to account for crossing a meridian/equator
+					$this->parameters[bounds] = array('sw_latitude'=>$swlat,'sw_longitude'=>$swlng,'ne_latitude'=>$nelat,'ne_longitude'=>$nelng);
+					$this->query_curl();
+					$grid[] = $this->response;
+					$this->throttle--;
+					if ($this->throttle == 0) {
+						echo "Process terminated with i == " . $i . " and j == " . $j;
+						break 2;
+					}
+				}
+			}
+		}
 
 	public function get_response(){
 		// Print it for debugging
@@ -138,6 +163,7 @@ class Yelp
 	private function query_curl(){
 		$data = json_decode($this->query_curl_helper());
 		//sort mode 1 or 2 allows an additional 20 businesses past the initial limit of the first 20 results
+		//sort key - 0=Best matched (default), 1=Distance, 2=Highest Rated (see http://www.yelp.com/developers/documentation/v2/search_api)
 		//code below retreives the additional results automatically.
 		$sort = $this->parameters[sort];
 		if (($data->total > 20) && isset($sort) && (in_array($sort, array(1,2)))) { 
@@ -149,7 +175,9 @@ class Yelp
 
 		// Handle Yelp response data
 		$this->response = $data;
-		$this->businesses = array_merge($this->businesses, $data->businesses);
+		if ($data->businesses) {
+			$this->businesses = array_merge($this->businesses, $data->businesses);
+		}
 	}
 
 	private function query_curl_helper(){
